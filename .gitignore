@@ -1,0 +1,15 @@
+# Environment variables
+.env
+
+# Data and results directories
+data/*
+results/*
+
+# IDE settings
+.claude
+
+# Virtual environment
+.venv
+
+# Python cache
+__pycache__

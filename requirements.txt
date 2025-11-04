@@ -1,0 +1,13 @@
+# PDF and image processing
+PyMuPDF==1.26.5
+Pillow==12.0.0
+
+# Google Gemini AI API
+google-generativeai==0.8.5
+
+# Data processing and export
+pandas==2.3.3
+openpyxl==3.1.5
+
+# Environment configuration
+python-dotenv==1.2.1
