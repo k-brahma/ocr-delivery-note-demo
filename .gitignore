@@ -5,6 +5,9 @@
 data/*
 results/*
 
+!data/sample.pdf
+!data/sample.csv
+
 # IDE settings
 .claude
 

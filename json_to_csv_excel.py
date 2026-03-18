@@ -1,14 +1,16 @@
 #!/usr/bin/env python3
 """
-results/ディレクトリ内のJSONファイルを読み込んで、
-1つのCSVとExcelファイルに変換するスクリプト
+results/json 内のJSONファイルを読み込んで、
+CSVとExcelファイルに変換するスクリプト
 """
 import json
 from pathlib import Path
 import pandas as pd
+from config import RESULTS_JSON_DIR, RESULTS_SUMMARY_DIR
+from logging_utils import get_app_logger
 
 
-def load_all_json_files(results_dir: str = "results"):
+def load_all_json_files(results_dir: Path = RESULTS_JSON_DIR):
     """
     resultsディレクトリ内の全JSONファイルを読み込む
 
@@ -18,15 +20,14 @@ def load_all_json_files(results_dir: str = "results"):
     Returns:
         list: 全ての納品書データのリスト
     """
-    results_path = Path(results_dir)
     all_data = []
 
     # JSONファイルを読み込み
-    json_files = sorted(results_path.glob("page_*_result.json"))
+    json_files = sorted(results_dir.glob("page_*_result.json"))
 
     for json_file in json_files:
-        print(f"Loading {json_file.name}...")
-        with open(json_file, "r", encoding="utf-8") as f:
+        get_app_logger().info("Loading JSON: %s", json_file.name)
+        with json_file.open("r", encoding="utf-8") as f:
             data = json.load(f)
 
         # データが配列の場合はそのまま、単一オブジェクトの場合はリスト化
@@ -62,7 +63,7 @@ def convert_to_dataframe(data_list):
     return df
 
 
-def save_to_csv_and_excel(df, output_dir: str = "results"):
+def save_to_csv_and_excel(df, output_dir: Path = RESULTS_SUMMARY_DIR):
     """
     DataFrameをCSVとExcelファイルに保存
 
@@ -73,48 +74,48 @@ def save_to_csv_and_excel(df, output_dir: str = "results"):
     Returns:
         tuple: (CSVファイルパス, Excelファイルパス)
     """
-    output_path = Path(output_dir)
+    output_dir.mkdir(parents=True, exist_ok=True)
 
     # CSVファイルとして保存
-    csv_file = output_path / "all_invoices.csv"
+    csv_file = output_dir / "all_invoices.csv"
     df.to_csv(csv_file, index=False, encoding="utf-8-sig")
-    print(f"CSV saved: {csv_file}")
+    get_app_logger().info("CSV saved: %s", csv_file)
 
     # Excelファイルとして保存
-    excel_file = output_path / "all_invoices.xlsx"
+    excel_file = output_dir / "all_invoices.xlsx"
     df.to_excel(excel_file, index=False, engine="openpyxl")
-    print(f"Excel saved: {excel_file}")
+    get_app_logger().info("Excel saved: %s", excel_file)
 
     return csv_file, excel_file
 
 
 def main():
-    print("=== JSON to CSV/Excel Converter ===\n")
+    logger = get_app_logger()
+    logger.info("=== JSON to CSV/Excel Converter ===")
 
     # 全JSONファイルを読み込み
-    all_data = load_all_json_files("results")
-    print(f"\nTotal records loaded: {len(all_data)}")
+    all_data = load_all_json_files(RESULTS_JSON_DIR)
+    logger.info("Total records loaded: %s", len(all_data))
 
     if not all_data:
-        print("No data found in results directory.")
+        logger.warning("No data found in results/json directory.")
         return
 
     # DataFrameに変換
     df = convert_to_dataframe(all_data)
 
     # データフレームの概要を表示
-    print("\n=== Data Summary ===")
-    print(df.head())
-    print(f"\nTotal rows: {len(df)}")
-    print(f"Columns: {list(df.columns)}")
+    logger.info("Data Summary:\n%s", df.head())
+    logger.info("Total rows: %s", len(df))
+    logger.info("Columns: %s", list(df.columns))
 
     # CSVとExcelに保存
-    print("\n=== Saving to CSV and Excel ===")
-    csv_file, excel_file = save_to_csv_and_excel(df, "results")
+    logger.info("Saving to CSV and Excel")
+    csv_file, excel_file = save_to_csv_and_excel(df, RESULTS_SUMMARY_DIR)
 
-    print("\n=== Conversion completed! ===")
-    print(f"CSV: {csv_file}")
-    print(f"Excel: {excel_file}")
+    logger.info("Conversion completed")
+    logger.info("CSV: %s", csv_file)
+    logger.info("Excel: %s", excel_file)
 
 
 if __name__ == "__main__":

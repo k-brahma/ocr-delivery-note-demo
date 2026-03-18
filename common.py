@@ -4,13 +4,22 @@
 """
 import os
 import json
+import logging
 from pathlib import Path
 import google.generativeai as genai
+from google.api_core.exceptions import PermissionDenied
 from PIL import Image
 from dotenv import load_dotenv
+from config import RESULTS_JSON_DIR, page_image_path
+from logging_utils import get_page_logger
 
 
-def extract_invoice_data(image_path: str, is_multiple: bool = False, api_key: str = None):
+def extract_invoice_data(
+    image_path: str,
+    is_multiple: bool = False,
+    api_key: str = None,
+    logger: logging.Logger | None = None,
+):
     """
     画像から納品書データを抽出
 
@@ -76,8 +85,10 @@ JSON形式のみを返してください。説明文は不要です。
 納品日は必ずyyyy/mm/dd形式（例: 2025/10/15）で出力してください。
 """
 
+    if logger:
+        logger.info("Analyzing image: %s", image_path)
+
     # APIリクエスト
-    print(f"Analyzing {image_path}...")
     response = model.generate_content([prompt, image])
 
     # レスポンスからJSONを抽出
@@ -99,51 +110,54 @@ JSON形式のみを返してください。説明文は不要です。
     return data
 
 
-def save_result(data, output_filename: str, results_dir: str = "results"):
+def save_result(data, output_filename: str, results_dir: Path = RESULTS_JSON_DIR):
     """
     結果をJSONファイルとして保存
 
     Args:
         data: 保存するデータ
         output_filename: 出力ファイル名
-        results_dir: 出力ディレクトリ (デフォルト: results)
+        results_dir: 出力ディレクトリ (デフォルト: results/json)
 
     Returns:
         Path: 保存したファイルのパス
     """
     # resultsディレクトリを作成
-    results_path = Path(results_dir)
-    results_path.mkdir(exist_ok=True)
+    results_dir.mkdir(parents=True, exist_ok=True)
 
     # JSONファイルとして保存
-    output_path = results_path / output_filename
-    with open(output_path, "w", encoding="utf-8") as f:
+    output_path = results_dir / output_filename
+    with output_path.open("w", encoding="utf-8") as f:
         json.dump(data, f, ensure_ascii=False, indent=2)
 
     return output_path
 
 
-def print_result(data, is_multiple: bool = False):
+def format_processing_error(error: Exception) -> str:
     """
-    結果を表示
-
-    Args:
-        data: 表示するデータ
-        is_multiple: 複数の納品書データの場合True
+    OCR処理エラーをユーザー向けメッセージに整形
     """
-    if is_multiple:
-        print(f"\n=== 抽出結果 (合計 {len(data)}件) ===")
-    else:
-        print("\n=== 抽出結果 ===")
+    if isinstance(error, PermissionDenied):
+        message = str(error)
+        if "API_KEY_SERVICE_BLOCKED" in message:
+            return (
+                "Gemini API request was blocked\n"
+                "reason_code: API_KEY_SERVICE_BLOCKED\n"
+                "service: generativelanguage.googleapis.com\n"
+                "method: google.ai.generativelanguage.v1beta.GenerativeService.GenerateContent\n"
+                "why: This app uses Gemini, not Cloud Vision API\n"
+                "action: Check GEMINI_API_KEY and allow the Generative Language API for that key/project"
+            )
+        return f"Gemini API permission denied: {message}"
 
-    try:
-        print(json.dumps(data, ensure_ascii=False, indent=2))
-    except UnicodeEncodeError:
-        # Windows環境での文字コードエラー対策
-        print(json.dumps(data, ensure_ascii=True, indent=2))
+    return f"{type(error).__name__}: {error}"
 
 
-def process_invoice_page(page_number: int, is_multiple: bool = False):
+def process_invoice_page(
+    page_number: int,
+    is_multiple: bool = False,
+    should_print_result: bool = False,
+):
     """
     指定されたページの納品書を処理
 
@@ -155,27 +169,39 @@ def process_invoice_page(page_number: int, is_multiple: bool = False):
         tuple: (成功フラグ, データ or エラーメッセージ)
     """
     # 対象画像
-    image_path = Path(f"data/page_{page_number}.jpeg")
+    image_path = page_image_path(page_number)
+    page_logger = get_page_logger(page_number)
 
     if not image_path.exists():
-        return False, f"Error: {image_path} not found"
+        error_message = f"Error: {image_path} not found"
+        page_logger.error(error_message)
+        return False, error_message
 
     try:
         # 納品書データを抽出
-        invoice_data = extract_invoice_data(str(image_path), is_multiple=is_multiple)
+        invoice_data = extract_invoice_data(
+            str(image_path),
+            is_multiple=is_multiple,
+            logger=page_logger,
+        )
 
-        # 結果を表示
-        print_result(invoice_data, is_multiple=is_multiple)
+        page_logger.info(
+            "OCR succeeded for page_%s (is_multiple=%s)",
+            page_number,
+            is_multiple,
+        )
+        page_logger.info(
+            "Extracted data:\n%s",
+            json.dumps(invoice_data, ensure_ascii=False, indent=2),
+        )
 
         # 結果を保存
         output_path = save_result(invoice_data, f"page_{page_number}_result.json")
-
-        print(f"\n結果を保存しました: {output_path}")
+        page_logger.info("Saved result JSON: %s", output_path)
 
         return True, invoice_data
 
     except Exception as e:
-        import traceback
-        error_msg = f"Error: {e}\n{traceback.format_exc()}"
-        print(error_msg)
-        return False, error_msg
+        error_message = format_processing_error(e)
+        page_logger.exception("OCR failed for page_%s: %s", page_number, error_message)
+        return False, error_message
